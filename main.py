@@ -4,6 +4,7 @@ import string
 from typing import List, Dict, Optional, Literal
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 from datetime import datetime
 
@@ -558,6 +559,111 @@ def test_database():
     except Exception as e:
         response["database"] = f"❌ Error: {str(e)[:50]}"
     return response
+
+
+# Minimal built-in UI while the frontend sandbox is unavailable
+@app.get("/ui", response_class=HTMLResponse)
+def minimal_ui():
+    return """
+<!doctype html>
+<html>
+<head>
+  <meta charset='utf-8'/>
+  <meta name='viewport' content='width=device-width, initial-scale=1'/>
+  <title>Rummy (Fallback UI)</title>
+  <style>
+    body{font-family:system-ui,Segoe UI,Roboto,Helvetica,Arial,sans-serif;background:#0b1020;color:#e8ecf3;margin:0}
+    .container{max-width:900px;margin:0 auto;padding:16px}
+    .card{background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.08);border-radius:14px;padding:14px;margin:12px 0}
+    input,button{padding:8px 10px;border-radius:8px;border:1px solid #344;outline:none;background:#141a33;color:#e8ecf3}
+    button{cursor:pointer}button:hover{background:#1b2344}
+    .row{display:flex;gap:8px;flex-wrap:wrap}
+    .badge{display:inline-block;padding:2px 8px;border-radius:999px;background:#263255;border:1px solid #344;color:#cdd7ff;font-size:12px}
+    .scroll{max-height:240px;overflow:auto}
+  </style>
+</head>
+<body>
+  <div class='container'>
+    <h1>Rummy (Fallback UI)</h1>
+    <div class='card'>
+      <div class='row'>
+        <input id='name' placeholder='Your name'/>
+        <button onclick='createTable()'>Create Table</button>
+      </div>
+      <div class='row' style='margin-top:8px;'>
+        <input id='code' placeholder='6-digit code'/>
+        <button onclick='joinTable()'>Join</button>
+        <button onclick='startRound()'>Start</button>
+      </div>
+      <div id='status' style='margin-top:8px' class='badge'></div>
+    </div>
+
+    <div class='card'>
+      <h3>Table</h3>
+      <pre id='table' class='scroll'></pre>
+    </div>
+
+    <div class='card'>
+      <h3>Chat</h3>
+      <div class='row'>
+        <input id='chat' placeholder='Type a message' style='flex:1'/>
+        <button onclick='sendChat()'>Send</button>
+      </div>
+      <pre id='history' class='scroll'></pre>
+    </div>
+  </div>
+  <script>
+    const pidKey = 'pid';
+    const pid = localStorage.getItem(pidKey) || (()=>{const v=Math.random().toString(36).slice(2);localStorage.setItem(pidKey,v);return v})()
+    const backend = ''
+    let pollTimer;
+
+    function setStatus(t){document.getElementById('status').textContent=t}
+    function getCode(){return document.getElementById('code').value.trim()}
+    function getName(){return document.getElementById('name').value.trim()}
+
+    async function createTable(){
+      const name = getName(); if(!name){setStatus('Enter name first');return}
+      const res = await fetch(`${backend}/table/create`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({player_id:pid,name, max_players:4, target_score:200, ace_value:10})})
+      const json = await res.json(); document.getElementById('code').value=json.code; setStatus('Table created. Code '+json.code)
+      startPolling()
+    }
+
+    async function joinTable(){
+      const code=getCode(), name=getName(); if(!code||!name){setStatus('Enter code and name');return}
+      const res = await fetch(`${backend}/table/${code}/join`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({player_id:pid,name})})
+      const json = await res.json(); setStatus('Joined table'); startPolling()
+    }
+
+    async function startRound(){
+      const code=getCode(); if(!code){return}
+      await fetch(`${backend}/round/start`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({code})})
+    }
+
+    async function sendChat(){
+      const code=getCode(); const text=document.getElementById('chat').value; if(!text||!code) return
+      await fetch(`${backend}/chat/send`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({code, sender_id: pid, text})})
+      document.getElementById('chat').value=''
+    }
+
+    async function poll(){
+      const code=getCode(); if(!code) return
+      try {
+        const t = await (await fetch(`${backend}/table/${code}`)).json()
+        document.getElementById('table').textContent = JSON.stringify(t,null,2)
+        const h = await (await fetch(`${backend}/history/${code}`)).json()
+        document.getElementById('history').textContent = JSON.stringify(h,null,2)
+      } catch(e) {}
+    }
+
+    function startPolling(){
+      if (pollTimer) clearInterval(pollTimer)
+      pollTimer = setInterval(poll, 400)
+    }
+  </script>
+</body>
+</html>
+"""
 
 
 if __name__ == "__main__":
